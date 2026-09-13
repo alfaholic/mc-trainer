@@ -1,0 +1,10 @@
+{
+  "name": "MC Trainer",
+  "short_name": "MC Trainer",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ECEEEC",
+  "theme_color": "#ECEEEC",
+  "icons": [{ "src": "icon.png", "sizes": "512x512", "type": "image/png" }]
+}
