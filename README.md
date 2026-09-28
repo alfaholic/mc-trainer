@@ -2,6 +2,8 @@
 
 A free motorcycle skills trainer for your phone. Empty parking lot, a bag of mini cones, 20 minutes a session. Sixteen drills, an eight-cycle program that gets progressively harder, and the pre-ride checklists every rider should know cold.
 
+![A drill card: to-scale cone diagram with dimensions, the ride path, objective, cue, and common fault](docs/drill-card.png)
+
 No ads, no accounts, no tracking, no backend. One HTML file that runs offline from your Home Screen. Progress stays on your phone.
 
 **Why it exists.** Most riders take one course and then never practice the skills that save lives: quick stops, swerves, stopping in a curve, slow-speed control. This app makes practicing those skills easy enough that you actually do it.
