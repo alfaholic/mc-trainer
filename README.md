@@ -1,4 +1,4 @@
-# MC Trainer
+# MC Trainer — free motorcycle skills training for your phone
 
 A free motorcycle skills trainer for your phone. Empty parking lot, a bag of mini cones, 20 minutes a session. Sixteen drills, an eight-cycle program that gets progressively harder, and the pre-ride checklists every rider should know cold.
 
