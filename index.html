@@ -86,10 +86,19 @@ summary{cursor:pointer;list-style:none;display:flex;justify-content:space-betwee
 summary::-webkit-details-marker{display:none}
 summary .t{font-family:"Barlow Condensed",Arial,sans-serif;font-size:20px;font-weight:600;text-transform:uppercase}
 summary .n{color:var(--muted);font-family:"Barlow Condensed",Arial,sans-serif;font-size:15px;letter-spacing:.06em}
+/* checklists + level line */
+.checks{display:grid;gap:6px;margin-top:8px}
+.checks button{text-align:left;font-size:15px;padding:8px 10px 8px 34px;position:relative}
+.checks button::before{content:"";position:absolute;left:10px;top:11px;width:14px;height:14px;border:2px solid var(--line);border-radius:3px}
+.checks button.on{color:var(--muted);text-decoration:line-through}
+.checks button.on::before{background:var(--go);border-color:var(--go)}
+.n.ok{color:var(--go)}
+.lvl{font-family:"Barlow Condensed",Arial,sans-serif;font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--cone);margin-top:4px}
+#ref a{color:var(--path)}
 textarea{width:100%;min-height:90px;font:13px/1.4 ui-monospace,Menlo,monospace;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:8px}
 @media print{
   body{padding:0;background:#fff;color:#000}
-  nav,header,#today,#cycle,.no-print{display:none!important}
+  nav,header,#today,#cycle,#ref,.no-print{display:none!important}
   #drills[hidden]{display:block!important}
   details{break-inside:avoid;page-break-inside:avoid}
   details>*{display:block}
@@ -115,12 +124,16 @@ textarea{width:100%;min-height:90px;font:13px/1.4 ui-monospace,Menlo,monospace;b
 
 <!-- DRILLS -->
 <section class="screen" id="drills" hidden></section>
+
+<!-- REF -->
+<section class="screen" id="ref" hidden></section>
 </div>
 
 <nav aria-label="Screens">
   <button data-go="today" aria-current="page">Today</button>
   <button data-go="cycle">Cycle</button>
   <button data-go="drills">Drills</button>
+  <button data-go="ref">Ref</button>
 </nav>
 
 <script>
@@ -130,14 +143,21 @@ textarea{width:100%;min-height:90px;font:13px/1.4 ui-monospace,Menlo,monospace;b
    ========================================================== */
 
 // ---- Range geometry (feet; x along the runway, y across it) ----
-// Box width and weave spacing depend on the cycle (they are the only cones that ever move).
+// Progression: every cycle has a level 1–3. Lane width, stop zone, weave spacing, box width
+// and target speed step down/up with the level. Bike size (Standard / Large) widens lane and box.
+// Runway line A is always y=10; line B is y=10+lane; cy is the lane centerline.
+const LEVEL = c => c<=2 ? 1 : c<=5 ? 2 : 3;
 function range(cycle){
-  const box = cycle>=8 ? 20 : cycle>=7 ? 22 : 24;
-  const wv  = cycle>=5 ? 10 : 12;
+  const L = LEVEL(cycle), big = (state.bike==='large');
+  const lane = [6,5,4][L-1] + (big?1:0);
+  const box  = [22,20,18][L-1] + (big?2:0);
+  const wv   = [12,11,10][L-1];
+  const zone = [4,3,2][L-1];
+  const mph  = [12,15,20][L-1];
   return {
-    box, wv,
+    L, lane, box, wv, zone, mph, cy:10+lane/2,
     cones:{
-      runway:[[0,10],[0,14],[60,10],[60,14]],
+      runway:[[0,10],[0,10+lane],[60,10],[60,10+lane]],
       box:[[120,10],[180,10],[120,10+box],[180,10+box]],
       weave:[0,1,2,3,4].map(i=>[10+i*wv,24]),
       swerve:[[100,12]],
@@ -188,104 +208,150 @@ function scalePath(d,X,Y,S){
   });
 }
 function rangeFig(cycle){
-  const {box,wv} = range(cycle);
+  const {box,wv,lane} = range(cycle);
   return draw({
     view:[-4,4,190,44], S:4,
-    dims:[[0,10,60,10,"60'",-1],[60,10,120,10,"60'",-1],[120,10+box,180,10+box,"60'",1],[0,10,0,14,"4'",-1],[120,10,120,10+box,box+"'",-1],[10,24,10+wv,24,wv+"'",1],[60,14,100,14,"40'",1]],
-    labels:[[2,19,"RUNWAY"],[124,7,`BOX ${box}'×60'`],[62,29,"WEAVE"],[96,10,"SWERVE"],[64,45,"CURVE"]],
+    dims:[[0,10,60,10,"60'",-1],[60,10,120,10,"60'",-1],[120,10+box,180,10+box,"60'",1],[0,10,0,10+lane,lane+"'",-1],[120,10,120,10+box,box+"'",-1],[10,24,10+wv,24,wv+"'",1],[60,10+lane,100,10+lane,"40'",1]],
+    labels:[[2,20,"RUNWAY"],[124,7,`BOX ${box}'×60'`],[62,29,"WEAVE"],[96,10,"SWERVE"],[64,45,"CURVE"]],
   }, cycle);
 }
 
 // ---- Drills. Every drill MUST have: name, fam, cones, obj, cue, fault, fig. ----
-const RUN = [[0,10,60,10,"60'",-1],[0,10,0,14,"4'",-1]];
+// `fig` may be a function of the range (r) for drills whose geometry changes with the level.
+// `lv` (optional) is a function of r returning what this level asks for.
+const RUN = r => [[0,10,60,10,"60'",-1],[0,10,0,10+r.lane,r.lane+"'",-1]];
 const DRILLS = {
  1:{name:"Friction-zone walk", fam:"Clutch control", cones:"Runway",
     obj:"Find the friction zone. Ease the clutch out until the bike creeps, walk it 10–15', squeeze, repeat down the lane. Feet stay on the ground.",
     cue:"Fingers move a quarter inch at a time. No throttle beyond a steady idle-plus. Feel for the moment the bike starts to pull.",
     fault:"Dumping the clutch. If it lurches, you released past the zone — smaller movements.",
-    fig:{view:[-4,4,70,16], S:6, hi:['runway'], start:[0,12], path:"M 2 12 L 22 12 M 26 12 L 46 12", dims:RUN, labels:[[2,19,"creep · squeeze · creep"]]}},
+    fig:r=>({view:[-4,4,70,18], S:6, hi:['runway'], start:[0,r.cy], path:`M 2 ${r.cy} L 22 ${r.cy} M 26 ${r.cy} L 46 ${r.cy}`, dims:RUN(r), labels:[[2,20,"creep · squeeze · creep"]]})},
  2:{name:"Power walk → feet up", fam:"Clutch + throttle", cones:"Runway",
     obj:"Walk the bike in the friction zone. By the 30' mark, both feet on the pegs. Ride to 60', stop, feet down.",
     cue:"Look at the far cones, not the tank. Feet come up as soon as the bike is pulling on its own — earlier than feels natural.",
     fault:"Paddling. Feet dragging past 30' means you're not trusting the friction zone yet — go back to drill 1 for a lap.",
-    fig:{view:[-4,4,70,16], S:6, hi:['runway'], start:[0,12], path:"M 2 12 L 58 12", dims:RUN, zones:[{x:28,y:9,w:4,h:6,k:'go',t:"feet up"}], labels:[[2,19,"walk → ride"]]}},
+    fig:r=>({view:[-4,4,70,18], S:6, hi:['runway'], start:[0,r.cy], path:`M 2 ${r.cy} L 58 ${r.cy}`, dims:RUN(r), zones:[{x:28,y:10,w:4,h:r.lane,k:'go',t:"feet up"}], labels:[[2,20,"walk → ride"]]})},
  3:{name:"Slow straight ride", fam:"Balance at walking pace", cones:"Runway",
-    obj:"Ride the 4' lane from 0' to 60' as slowly as you can, feet up the whole way, without touching a cone or dabbing.",
+    obj:"Ride the lane from 0' to 60' as slowly as you can, feet up the whole way, without touching a cone or dabbing.",
     cue:"Head up, eyes on the far pair. Throttle steady, clutch in the zone, a little rear brake to hold speed. Knees on the tank.",
     fault:"Staring at the front wheel. The bike wobbles because your eyes dropped.",
-    fig:{view:[-4,4,70,16], S:6, hi:['runway'], start:[0,12], path:"M 2 12 L 58 12", dims:RUN, labels:[[2,19,"feet up entire lane"]]}},
+    lv:r=>`${r.lane}' lane`,
+    fig:r=>({view:[-4,4,70,18], S:6, hi:['runway'], start:[0,r.cy], path:`M 2 ${r.cy} L 58 ${r.cy}`, dims:RUN(r), labels:[[2,20,"feet up entire lane"]]})},
  4:{name:"Shift up, shift down, stop", fam:"Shifting", cones:"Runway + box near edge",
     obj:"Launch, shift to 2nd by the 60' pair, roll off, downshift to 1st and stop with the front tire on the 120' line.",
     cue:"Roll off, clutch in, tap the shifter, clutch out smoothly — one motion. Downshift while still moving, before the stop.",
     fault:"Stopping in 2nd. Get the downshift done early so the bike is ready to move again.",
-    fig:{view:[-4,4,128,16], S:4, hi:['runway','box'], start:[0,12], path:"M 2 12 L 117 12", zones:[{x:119,y:9,w:2,h:6,k:'stop',t:"stop line"}], dims:[[0,10,60,10,"60' — up to 2nd",-1],[60,10,120,10,"60' — down to 1st",-1]], labels:[[2,19,"START"]]}, wide:true},
+    fig:r=>({view:[-4,4,128,18], S:4, hi:['runway','box'], start:[0,r.cy], path:`M 2 ${r.cy} L 117 ${r.cy}`, zones:[{x:119,y:10,w:2,h:r.lane,k:'stop',t:"stop line"}], dims:[[0,10,60,10,"60' — up to 2nd",-1],[60,10,120,10,"60' — down to 1st",-1]], labels:[[2,20,"START"]]}), wide:true},
  5:{name:"Normal stop at a marker", fam:"Braking", cones:"Runway + box near edge",
-    obj:"At 10–15 mph, stop with the front tire inside a 2' zone at the 120' line. Both brakes, smooth, straight up.",
+    obj:"At 10–15 mph, stop with the front tire inside the stop zone at the 120' line. Both brakes, smooth, straight up.",
     cue:"Squeeze the front, press the rear, clutch in as you slow. Left foot down first at the stop, right foot on the brake.",
     fault:"Overshooting. Start braking earlier and squeeze less — the goal is precision, not force.",
-    fig:{view:[-4,4,128,16], S:4, hi:['runway','box'], start:[0,12], path:"M 2 12 L 117 12", zones:[{x:119,y:9,w:2,h:6,k:'stop',t:"2' zone"}], dims:[[0,10,60,10,"60' — 10–15 mph",-1],[60,10,120,10,"60'",-1]], labels:[[2,19,"START"]]}, wide:true},
+    lv:r=>`${r.zone}' stop zone`,
+    fig:r=>({view:[-4,4,128,18], S:4, hi:['runway','box'], start:[0,r.cy], path:`M 2 ${r.cy} L 117 ${r.cy}`, zones:[{x:120-r.zone,y:10,w:r.zone,h:r.lane,k:'stop',t:`${r.zone}' zone`}], dims:[[0,10,60,10,"60' — 10–15 mph",-1],[60,10,120,10,"60'",-1]], labels:[[2,20,"START"]]}), wide:true},
  6:{name:"Quick stop", fam:"Emergency braking", cones:"Runway + swerve cone as speed marker",
-    obj:"Build to 15–20 mph by the 60' pair. At the swerve cone, stop as short as you can, straight up, front wheel inside the 20' brake zone.",
+    obj:"Build to the target speed by the 60' pair. At the swerve cone, stop as short as you can, straight up, front wheel inside the 20' brake zone.",
     cue:"Both brakes at once, squeeze — don't grab. Front brake does most of the work; add pressure as weight moves forward. Clutch in, downshift to first, head up at the horizon.",
     fault:"Rear lock (chirp). If it locks, keep it locked until stopped — releasing mid-skid can high-side. Ease the rear pressure next rep.",
-    fig:{view:[-4,4,128,16], S:4, hi:['runway','swerve','box'], start:[0,12], path:"M 2 12 L 99 12", zones:[{x:100,y:9,w:20,h:6,k:'stop',t:"brake zone 20'"}], dims:[[0,10,60,10,"60' — reach 15–20 mph",-1],[60,10,100,10,"40'",-1]], labels:[[2,19,"START"]]}, wide:true},
+    lv:r=>`~${r.mph} mph at the cone`,
+    fig:r=>({view:[-4,4,128,18], S:4, hi:['runway','swerve','box'], start:[0,r.cy], path:`M 2 ${r.cy} L 99 ${r.cy}`, zones:[{x:100,y:10,w:20,h:r.lane,k:'stop',t:"brake zone 20'"}], dims:[[0,10,60,10,`60' — reach ~${r.mph} mph`,-1],[60,10,100,10,"40'",-1]], labels:[[2,20,"START"]]}), wide:true},
  7:{name:"Slow cone weave", fam:"Slow speed · handlebar steering", cones:"Weave line",
     obj:"Ride the five cones at walking pace without touching one, then come back through the other way.",
     cue:"Head and eyes on the last cone, not the one beside you. Steady throttle, clutch in the friction zone, light drag on the rear brake.",
     fault:"Looking down at the cone you're passing. Where you look is where you go.",
-    fig:{view:[-4,16,72,18], S:6, hi:['weave'], start:[0,24], path:"M 2 24 Q 10 18 16 24 Q 22 30 28 24 Q 34 18 40 24 Q 46 30 52 24 Q 58 18 66 24", dims:[[10,24,22,24,"12'",1]], labels:[[0,20,"walking pace →"]]}},
+    lv:r=>`cones ${r.wv}' apart`,
+    fig:r=>{const w=r.wv, p=[0,1,2,3,4].map(i=>10+i*w); return {view:[-4,16,72,18], S:6, hi:['weave'], start:[0,24], path:`M 2 24 ${p.map((x,i)=>`Q ${x} ${i%2?30:18} ${x+w/2} 24`).join(' ')}`, dims:[[10,24,10+w,24,w+"'",1]], labels:[[0,20,"walking pace →"]]};}},
  8:{name:"Press to turn", fam:"Counter-steering", cones:"Runway + swerve cone",
-    obj:"At 12–15 mph, press the right grip forward: the bike leans and goes right. Move one lane over past the swerve cone, then press left to come back.",
+    obj:"At speed, press the right grip forward: the bike leans and goes right. Move one lane over past the swerve cone, then press left to come back.",
     cue:"Press, don't pull. A firm press on the grip in the direction you want to go. Look where you want to end up.",
     fault:"Steering the bars like a bicycle. Above walking pace, pressing is what leans the bike — trust it.",
-    fig:{view:[-4,4,128,20], S:4, hi:['runway','swerve'], start:[0,12], path:"M 2 12 L 80 12 Q 92 12 96 18 L 108 18 Q 114 18 118 12", dims:[[0,10,60,10,"60' — 12–15 mph",-1]], labels:[[82,24,"press right → right"]]}, wide:true},
+    lv:r=>`~${Math.min(r.mph,15)} mph`,
+    fig:r=>({view:[-4,4,128,20], S:4, hi:['runway','swerve'], start:[0,r.cy], path:`M 2 ${r.cy} L 80 ${r.cy} Q 92 ${r.cy} 96 18 L 108 18 Q 114 18 118 ${r.cy}`, dims:[[0,10,60,10,`60' — ~${Math.min(r.mph,15)} mph`,-1]], labels:[[82,24,"press right → right"]]}), wide:true},
  9:{name:"Curve: outside, inside, outside", fam:"Cornering · vision", cones:"Curve arc",
     obj:"Enter wide, apex at the middle cone, exit wide. Slow before the curve, look through it, roll on the throttle from the apex out.",
     cue:"Slow · look · press · roll. All braking done before you lean. Turn your head first; the bike follows.",
     fault:"Braking in the curve. Set your speed early and the curve gets easy.",
+    lv:r=>["walking pace, 1st gear","2nd gear, steady throttle","2nd gear, roll on from the apex"][r.L-1],
     fig:{view:[56,20,64,26], S:5, hi:['curve'], start:[60,25], path:"M 62 26 Q 88 36 114 26", labels:[[62,45,"outside · inside · outside"]]}},
  10:{name:"Swerve", fam:"Obstacle avoidance", cones:"Runway + swerve cone",
-    obj:"At 12–15 mph ride straight at the swerve cone. Two quick presses: right to miss it, left to straighten. Then again, passing left.",
+    obj:"At speed, ride straight at the swerve cone. Two quick presses: right to miss it, left to straighten. Then again, passing left.",
     cue:"Press, press. Keep the throttle steady and your body upright — let the bike lean under you. No brakes during the swerve.",
     fault:"Braking and swerving at once. Do one or the other; braking in the swerve is how the front tucks.",
-    fig:{view:[-4,4,128,16], S:4, hi:['runway','swerve'], start:[0,12], path:"M 2 12 L 92 12 Q 96 12 98 8 L 102 8 Q 104 8 108 12 L 118 12", dims:[[0,10,60,10,"60' — 12–15 mph",-1]], labels:[[86,19,"press R · press L"]]}, wide:true},
+    lv:r=>`~${Math.min(r.mph,15)} mph`,
+    fig:r=>({view:[-4,4,128,18], S:4, hi:['runway','swerve'], start:[0,r.cy], path:`M 2 ${r.cy} L 92 ${r.cy} Q 96 ${r.cy} 98 8 L 102 8 Q 104 8 108 ${r.cy} L 118 ${r.cy}`, dims:[[0,10,60,10,`60' — ~${Math.min(r.mph,15)} mph`,-1]], labels:[[86,20,"press R · press L"]]}), wide:true},
  11:{name:"U-turn in the box", fam:"Limited-space maneuvers", cones:"Box",
     obj:"Enter the box down one long side and turn 180° inside the width without a foot down. Then the other direction.",
     cue:"Slow before the turn, turn your head all the way to the exit, counter-weight (push the outside peg), keep the throttle steady and let the clutch and rear brake set the speed.",
     fault:"Chopping the throttle mid-turn. Speed drops, the bike wants to fall in. Keep the engine pulling and control speed with the clutch.",
+    lv:r=>`${r.box}' box`,
     fig:r=>({view:[96,4,90,36], S:5, hi:['box','swerve'], start:[100,12], path:`M 102 12.5 L 158 12.5 A ${r.box/2-2.5} ${r.box/2-2.5} 0 0 1 158 ${7.5+r.box} L 118 ${7.5+r.box}`, dims:[[120,10,180,10,"60'",-1],[120,10,120,10+r.box,r.box+"'",-1]], labels:[[121,40,`box is ${r.box}' this cycle`]]})},
  12:{name:"Figure-8 in the box", fam:"Combined slow-speed", cones:"Box",
     obj:"Two U-turns linked into a figure-8, all inside the box, no foot down. Left loop then right loop.",
     cue:"Everything from the U-turn, twice: head around early, steady throttle, clutch and rear brake set the speed. Straighten for a beat at the crossing.",
     fault:"Rushing the crossing. Let the bike stand up for a moment between loops so the second turn starts from balance.",
+    lv:r=>`${r.box}' box`,
     fig:r=>{const m=10+r.box/2, t=11, b=9+r.box; return {view:[112,4,76,36], S:5, hi:['box'], start:[150,m], path:`M 150 ${m} Q 176 ${t} 176 ${m} Q 176 ${b} 150 ${m} Q 124 ${t} 124 ${m} Q 124 ${b} 150 ${m}`, dims:[[120,10,180,10,"60'",-1],[120,10,120,10+r.box,r.box+"'",-1]]};}},
- 13:{name:"Skills lap", fam:"Everything, linked", cones:"Whole Range",
-    obj:"Runway launch → swerve → U-turn in the box → curve → weave back → normal stop at the start. Repeat until time's up.",
-    cue:"Each element gets its own cue. The lap is about transitions: set speed early for the next element while finishing this one.",
+ 13:{name:"Turn from a stop", fam:"Low-speed turning · where bikes get dropped", cones:"Runway 60' pair + box near edge",
+    obj:"Stop at the 60' pair, then launch and turn 90° right into the space before the box, feet up, without wandering wide. Reset and do it turning left.",
+    cue:"Head turned to where you'll end up before the clutch moves. Friction zone plus a little rear brake; bars turned, body upright. Throttle steady — never chop it in the turn.",
+    fault:"Looking at the ground or the cone. Also: too much throttle then grabbing the clutch, which stands the bike up wide. Slow hands, fast head.",
+    lv:r=>["feet down allowed until you're pointed the right way","feet up by the middle of the turn","feet up from launch, tight arc, both directions"][r.L-1],
+    fig:r=>({view:[50,4,80,36], S:5, hi:['runway','swerve'], start:[65,r.cy], path:`M 67 ${r.cy} L 78 ${r.cy} Q 90 ${r.cy} 90 26 L 90 36`, zones:[{x:58,y:10,w:4,h:r.lane,k:'stop',t:"stop"}], labels:[[92,24,"turn right, feet up"]]})},
+ 14:{name:"Stop in a curve", fam:"Braking while leaned · life-saver", cones:"Curve arc",
+    obj:"Ride the curve as in drill 9. Halfway through, stop: straighten the bars to square the bike up, then both brakes to a full stop. Then again at a chosen point.",
+    cue:"Square up first — the tires can brake or lean, not both. Then squeeze and press exactly as in a normal stop. Head up, eyes on the exit until the last second.",
+    fault:"Braking while still leaned. Even a small lean plus hard brakes is how the front slides. Upright, then brake.",
+    lv:r=>["walking pace, 1st gear","~10 mph","~15 mph, stop on a called mark"][r.L-1],
+    fig:{view:[56,20,64,26], S:5, hi:['curve'], start:[60,25], path:"M 62 26 Q 80 34 92 33", zones:[{x:90,y:28,w:8,h:8,k:'stop',t:"square up · stop"}], labels:[[62,45,"straighten, then brake"]]}},
+ 15:{name:"Lane change with head check", fam:"Street habits · mirrors, head check, signal", cones:"Runway + swerve cone",
+    obj:"Ride the lane at speed. Before the swerve cone: mirror, head check over your shoulder, signal, then press to move one lane over. Cancel the signal. Come back the same way.",
+    cue:"Mirror · head · signal · press, in that order, every time — it has to become automatic before you're in traffic. Keep the throttle steady through the move.",
+    fault:"Skipping the head check because the lot is empty. The lot is where the habit gets built; the street is where it's tested.",
+    lv:r=>["one lane change per pass, ~12 mph","out and back each pass, ~15 mph","out and back at ~15 mph with a 3-second 'car' count before each move"][r.L-1],
+    fig:r=>({view:[-4,4,128,20], S:4, hi:['runway','swerve'], start:[0,r.cy], path:`M 2 ${r.cy} L 56 ${r.cy} Q 70 ${r.cy} 76 18 L 118 18`, zones:[{x:40,y:10,w:14,h:r.lane,k:'go',t:"mirror · head · signal"}], dims:[[0,10,60,10,"60'",-1]], labels:[[84,23,"press → one lane over"]]}), wide:true},
+ 16:{name:"Uphill start", fam:"Hill control · bonus, needs a slope", cones:"None — a driveway or ramp, not the Range",
+    obj:"Stopped facing uphill, right foot on the rear brake, left foot down. Find the friction zone until the bike pulls against the brake, then release the brake and roll away without rolling back.",
+    cue:"Rear brake holds the bike; the clutch does the launching. More throttle than on flat ground, released more slowly. Head up the hill, not at the ground.",
+    fault:"Releasing the brake before the clutch is pulling. The bike rolls back, you panic-grab, it stalls or lurches. Brake stays on until you feel the pull.",
+    lv:r=>["gentle slope, take your time","steeper slope, no roll-back at all","steep slope with a turn at the top, feet up early"][r.L-1],
+    fig:{view:[-4,4,70,18], S:6, hi:[], start:[8,12], path:"M 10 12 L 30 12 L 58 8", zones:[{x:4,y:8,w:8,h:8,k:'stop',t:"brake on"}], labels:[[16,6,"find the pull, then release the brake"],[32,20,"↑ uphill · not on the Range"]]}},
+ 17:{name:"Skills lap", fam:"Everything, linked · SEE: search, evaluate, execute", cones:"Whole Range",
+    obj:"Runway launch → lane change → swerve → U-turn in the box → curve → weave back → normal stop at the start. Repeat until time's up.",
+    cue:"Each element gets its own cue. The lap is about transitions: set speed early for the next element while finishing this one. Search ahead, evaluate the next element, execute.",
     fault:"Carrying runway speed into the box. Slow down before the box edge, not inside it.",
-    fig:{view:[-4,4,190,44], S:4, start:[0,12], path:"M 2 12 L 92 12 Q 98 8 108 12 L 158 12.5 A 9.5 9.5 0 0 1 158 31.5 L 114 30 Q 88 38 66 24 Q 58 18 52 24 Q 46 30 40 24 Q 34 18 28 24 Q 22 30 16 24 Q 10 18 2 24", labels:[[2,19,"START"]]}, wide:true},
+    fig:r=>({view:[-4,4,190,44], S:4, start:[0,r.cy], path:`M 2 ${r.cy} L 92 ${r.cy} Q 98 8 108 ${r.cy} L 158 12.5 A ${r.box/2-2.5} ${r.box/2-2.5} 0 0 1 158 ${7.5+r.box} L 114 30 Q 88 38 66 24 Q 58 18 52 24 Q 46 30 40 24 Q 34 18 28 24 Q 22 30 16 24 Q 10 18 2 24`, labels:[[2,20,"START"]]}), wide:true},
 };
 for(const [n,d] of Object.entries(DRILLS)) for(const k of ['name','fam','cones','obj','cue','fault','fig']) if(!d[k]) throw new Error(`Drill ${n} is missing "${k}"`);
 
 // ---- The plan: 8 cycles. Each session = [drill A (8 min), drill B (6 min)]. ----
 // Bonus sessions are skills laps on the whole Range plus the cycle's primary drill.
+// Easiest to hardest: cycles 1–2 are level 1, 3–5 level 2, 6–8 level 3 (see LEVEL / range()).
 const PLAN = [
- {goal:"Own the friction zone", hit:"Ride the 4' lane 0'→60' at walking pace, feet up, no dab — three times in a row.", core:[[1,2],[2,3],[3,5]], primary:3},
- {goal:"Slow-speed balance", hit:"Full weave both directions, feet up, no cone touched.", core:[[7,3],[7,5],[7,3]], primary:7},
- {goal:"Clean shifting and stopping", hit:"Front tire in the 2' zone on 3 of 4 stops.", core:[[4,5],[5,4],[6,5]], primary:5},
+ {goal:"Own the friction zone", hit:"Ride the lane 0'→60' at walking pace, feet up, no dab — three times in a row.", core:[[1,2],[2,3],[3,13]], primary:3},
+ {goal:"Slow-speed balance", hit:"Full weave both directions, feet up, no cone touched.", core:[[7,3],[7,13],[7,5]], primary:7},
+ {goal:"Clean shifting and stopping", hit:"Front tire in the stop zone on 3 of 4 stops.", core:[[4,5],[5,4],[6,5]], primary:5},
  {goal:"Lean to turn", hit:"Outside–inside–outside line through the curve on every lap.", core:[[8,9],[9,7],[9,8]], primary:9},
- {goal:"Quick stop", hit:"Quick stop from ~20 mph with no rear lock and no stall, 3 of 4.", core:[[6,5],[6,9],[6,7]], primary:6},
- {goal:"Swerve", hit:"Clean swerve around the cone at ~15 mph, both directions.", core:[[10,8],[10,6],[10,9]], primary:10},
- {goal:"The box", hit:"Two U-turns inside the box, no foot down. Box is 22' this cycle.", core:[[11,7],[11,12],[11,7]], primary:11},
- {goal:"Combine and tighten", hit:"Figure-8 in the 20' box, then a quick stop, back-to-back.", core:[[12,6],[11,10],[12,6]], primary:12},
+ {goal:"Stop from speed — straight and in a curve", hit:"Quick stop at this level's speed with no rear lock and no stall, 3 of 4; stop in the curve with the bike squared up every time.", core:[[6,5],[6,14],[14,6]], primary:6},
+ {goal:"Swerve and change lanes", hit:"Clean swerve around the cone at ~15 mph, both directions; head check before every lane change without thinking about it.", core:[[10,8],[10,15],[15,10]], primary:10},
+ {goal:"The box", hit:"Two U-turns inside this level's box, no foot down.", core:[[11,7],[11,12],[11,13]], primary:11},
+ {goal:"Combine and tighten", hit:"Figure-8 in the box, then a quick stop, back-to-back.", core:[[12,6],[14,10],[12,6]], primary:12},
 ];
+// Bonus 1 = skills lap + the cycle's primary drill. Bonus 2 = uphill start (needs a slope) + primary.
 const SESSIONS = c => [...PLAN[c-1].core.map((d,i)=>({key:`c${c}s${i+1}`,label:`Core ${i+1}`,core:true,drills:d})),
-                       [1,2].map(i=>({key:`c${c}b${i}`,label:`Bonus ${i}`,core:false,drills:[13,PLAN[c-1].primary]}))].flat();
+                       {key:`c${c}b1`,label:'Bonus 1',core:false,drills:[17,PLAN[c-1].primary]},
+                       {key:`c${c}b2`,label:'Bonus 2',core:false,drills:[16,PLAN[c-1].primary]}];
+
+// ---- Checklists. Tap to tick; they reset every session. Learn them until you don't need the list. ----
+const CHECKS = {
+  tclocs:{title:"T-CLOCS · bike", items:["Tires & wheels — pressure, tread, no cracks; wheels true, spokes/rims fine","Controls — levers, cables, hoses, throttle snaps back","Lights & electrics — headlight hi/lo, brake light both brakes, signals, horn","Oil & fluids — engine oil level, brake fluid, no leaks under the bike","Chassis — frame, suspension, chain/belt tension and lube, fasteners","Stands — side stand springs back, center stand (if any) up"]},
+  gear:{title:"Gear · all of it", items:["Helmet — DOT/ECE, strap snug","Eye protection — visor or glasses","Jacket — abrasion resistant, armor in","Gloves — full finger","Pants — riding pants or armored jeans","Boots — over the ankle, non-slip sole"]},
+  finec:{title:"FINE-C · start-up", items:["Fuel — enough for the session (gauge or trip meter)","Ignition — key on, dash lights up","Neutral — light on; rock the bike to confirm","Engine cut-off — switch to RUN","Clutch — squeeze in, thumb the starter"]},
+};
+let prep = {};
 
 // ---- State ----
 const KEY='mct.v1';
-let state = {done:{}};
-try{ state = JSON.parse(localStorage.getItem(KEY)) || state; }catch(e){}
+let state = {done:{}, bike:'std'};
+try{ state = Object.assign(state, JSON.parse(localStorage.getItem(KEY))||{}); }catch(e){}
 const save = ()=>{ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} };
 const coreDone = c => PLAN[c-1].core.filter((_,i)=>state.done[`c${c}s${i+1}`]).length;
 const currentCycle = ()=>{ for(let c=1;c<=8;c++) if(coreDone(c)<3) return c; return 8; };
@@ -298,8 +364,8 @@ function renderToday(){
   const c = viewCycle, p = PLAN[c-1], sessions = SESSIONS(c);
   if(!viewSession || !sessions.find(s=>s.key===viewSession)) viewSession = (sessions.find(s=>s.core && !state.done[s.key]) || sessions[0]).key;
   const s = sessions.find(x=>x.key===viewSession), done = state.done[s.key];
-  const {box,wv} = range(c);
-  document.getElementById('hdr-eyebrow').textContent = `Cycle ${c} · ${s.label}`;
+  const r = range(c), {box,wv,lane,L} = r;
+  document.getElementById('hdr-eyebrow').textContent = `Cycle ${c} · ${s.label} · Level ${L}`;
   const [A,B] = s.drills;
   const block = (n,min,slot)=>{ const d=DRILLS[n]; return `
     <div class="block">
@@ -307,6 +373,7 @@ function renderToday(){
       <button class="timer" data-timer="${slot}" data-min="${min}">${min}:00</button>
       <div class="m">${min} min · ${d.fam}</div>
     </div>
+    ${d.lv ? `<div class="lvl">Level ${L} of 3 · ${d.lv(r)}</div>` : ''}
     <div class="fig ${d.wide?'wide':''}">${draw(d.fig,c)}</div>
     <dl><dt>Objective</dt><dd>${d.obj}</dd><dt>Cue</dt><dd>${d.cue}</dd><dt>Fault</dt><dd>${d.fault}</dd></dl>
     ${done ? '' : `<div class="rate" data-rate="${n}" aria-label="Rate ${d.name} 1 to 5">${[1,2,3,4,5].map(v=>`<button data-v="${v}">${v}</button>`).join('')}</div>`}`; };
@@ -317,17 +384,25 @@ function renderToday(){
       <div class="hit">${p.hit}</div>
       <div class="chips">${sessions.map(x=>`<button class="chip ${x.key===viewSession?'on':''} ${state.done[x.key]?'done':''}" data-session="${x.key}">${x.label}</button>`).join('')}</div>
     </section>
+    <section class="card no-print">
+      <div class="eyebrow">Before you ride</div>
+      ${Object.entries(CHECKS).map(([k,ck])=>{ const n=ck.items.filter((_,i)=>prep[k+i]).length; return `
+      <details ${prep.open===k?'open':''} data-check-group="${k}"><summary><span class="t">${ck.title}</span><span class="n ${n===ck.items.length?'ok':''}">${n}/${ck.items.length}</span></summary>
+        <div class="checks">${ck.items.map((t,i)=>`<button class="${prep[k+i]?'on':''}" data-check="${k+i}">${t}</button>`).join('')}</div>
+      </details>`; }).join('')}
+      <p class="note">Tap to tick. The goal is to know these cold — details in <b>Ref</b>.</p>
+    </section>
     <section class="card">
       <div class="block" style="border-top:0">
         <div class="t">Set the Range</div>
         <button class="timer" data-timer="setup" data-min="4">4:00</button>
-        <div class="m">4 min · 17 cones · box ${box}' · weave ${wv}' · one easy lap</div>
+        <div class="m">4 min · 17 cones · lane ${lane}' · box ${box}' · weave ${wv}' · one easy lap</div>
       </div>
       <div class="fig wide">${rangeFig(c)}</div>
       <details class="no-print"><summary><span class="n">Cone placement steps</span></summary>
         <ol class="steps">
           <li><b>Runway line A.</b> A straight line along the lot. Cone at 0', cone at 60' (20 paces).</li>
-          <li><b>Runway line B.</b> 4' to the right of A. Cones at 0' and 60'.</li>
+          <li><b>Runway line B.</b> ${lane}' to the right of A. Cones at 0' and 60'.</li>
           <li><b>Swerve cone.</b> On line A's centerline, at 100'.</li>
           <li><b>Box.</b> Near corners at 120' on line A and ${box}' to the right. Far corners 60' further. Four cones.</li>
           <li><b>Weave.</b> A line 10' right of line B, starting at 10'. Five cones, ${wv}' apart.</li>
@@ -343,12 +418,14 @@ function renderToday(){
     </section>`;
   const ratings = {};
   const q = sel => document.querySelectorAll(sel);
-  q('#today [data-session]').forEach(b=>b.onclick=()=>{ viewSession=b.dataset.session; stopTimers(); renderToday(); });
+  q('#today [data-session]').forEach(b=>b.onclick=()=>{ viewSession=b.dataset.session; prep={}; stopTimers(); renderToday(); });
+  q('#today [data-check]').forEach(b=>b.onclick=()=>{ prep[b.dataset.check]=!prep[b.dataset.check]; prep.open=b.closest('details').dataset.checkGroup; const y=window.scrollY; renderToday(); window.scrollTo(0,y); });
+  q('#today [data-check-group]').forEach(d=>d.ontoggle=()=>{ if(d.open) prep.open=d.dataset.checkGroup; else if(prep.open===d.dataset.checkGroup) prep.open=null; });
   q('#today .rate').forEach(r=>r.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     ratings[r.dataset.rate]=+b.dataset.v; r.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
     const m=document.getElementById('mark'); if(ratings[A]&&ratings[B]){ m.disabled=false; m.textContent='Mark session done'; }
   }));
-  const mark=document.getElementById('mark'); if(mark) mark.onclick=()=>{ state.done[s.key]={ts:Date.now(),r:{...ratings}}; save(); stopTimers(); viewCycle=currentCycle(); viewSession=null; renderToday(); window.scrollTo(0,0); };
+  const mark=document.getElementById('mark'); if(mark) mark.onclick=()=>{ state.done[s.key]={ts:Date.now(),r:{...ratings}}; save(); stopTimers(); prep={}; viewCycle=currentCycle(); viewSession=null; renderToday(); window.scrollTo(0,0); };
   q('#today [data-undo]').forEach(b=>b.onclick=()=>{ delete state.done[b.dataset.undo]; save(); renderToday(); });
   q('#today [data-timer]').forEach(b=>b.onclick=()=>toggleTimer(b));
 }
@@ -395,17 +472,48 @@ function renderCycle(){
 
 // ---- Drills library ----
 function renderDrills(){
-  document.getElementById('drills').innerHTML=`<section class="card"><h2>Drills <small>12 + the skills lap</small></h2>`+
+  const r=range(viewCycle);
+  document.getElementById('drills').innerHTML=`<section class="card"><h2>Drills <small>16 + the skills lap · shown at level ${r.L}</small></h2>`+
     Object.entries(DRILLS).map(([n,d])=>`<details><summary><span class="t">${n}. ${d.name}</span><span class="n">${d.fam}</span></summary>
+      ${d.lv ? `<div class="lvl">Level ${r.L} of 3 · ${d.lv(r)}</div>` : ''}
       <div class="fig ${d.wide?'wide':''}">${draw(d.fig,viewCycle)}</div>
       <dl><dt>Cones</dt><dd>${d.cones} <span class="tag">0 moves</span></dd><dt>Objective</dt><dd>${d.obj}</dd><dt>Cue</dt><dd>${d.cue}</dd><dt>Fault</dt><dd>${d.fault}</dd></dl></details>`).join('')+`</section>`;
+}
+
+// ---- Ref: acronyms, settings, about ----
+const ACRONYMS = [
+  ["T-CLOCS","Pre-ride inspection. Tires & wheels · Controls · Lights & electrics · Oil & fluids · Chassis · Stands. Two minutes before every ride; most of it is a look and a squeeze."],
+  ["FINE-C","Start-up sequence. Fuel · Ignition · Neutral · Engine cut-off switch · Clutch (and choke, on a carbureted bike). Same order every time so you never crank a bike in gear."],
+  ["SEE","How you ride in traffic. Search 12+ seconds ahead and to the sides · Evaluate what could go wrong and where you'd go · Execute: adjust speed, position, or communicate. The skills lap practices it."],
+  ["Slow · Look · Press · Roll","Every curve. Slow before the turn · Look through it to the exit · Press the inside grip to lean · Roll on the throttle from the apex out."],
+  ["Press · Press","The swerve. Press the grip on the side you want to go, then press the other side to straighten. No brakes while swerving."],
+  ["Square up, then brake","Stopping in a curve. Straighten the bars so the bike is upright, then both brakes. Tires can lean or brake hard — not both."],
+  ["Friction zone","The band of clutch travel where the engine starts to drive the wheel. Every slow-speed skill lives here: steady throttle, clutch sets the speed, a little rear brake steadies the bike."],
+];
+function renderRef(){
+  document.getElementById('ref').innerHTML=`
+    <section class="card"><h2>Know these cold</h2>
+      <dl>${ACRONYMS.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    </section>
+    <section class="card">
+      <h3>Bike size</h3>
+      <p class="note">Large widens the lane by 1' and the box by 2' at every level. Pick Large for a full-size cruiser or tourer (roughly 600 lb+ or a 64"+ wheelbase). Cone positions update everywhere.</p>
+      <div class="chips"><button class="chip ${state.bike!=='large'?'on':''}" data-bike="std">Standard</button><button class="chip ${state.bike==='large'?'on':''}" data-bike="large">Large</button></div>
+    </section>
+    <section class="card">
+      <h3>About</h3>
+      <p class="note" style="color:var(--ink)">MC Trainer is free, has no ads, no accounts and no tracking, and keeps everything on your phone. It exists for one reason: to help riders stay sharp between rides.</p>
+      <p class="note">The drills follow the skill families taught in the <b>Motorcycle Safety Foundation</b> Basic RiderCourse — friction zone, slow-speed control, shifting, braking, cornering, swerving and limited-space turns. MSF's curriculum is the reference for rider training in the US, and the single best thing you can do for your riding is take their course: <a href="https://msf-usa.org" target="_blank" rel="noopener">msf-usa.org</a>. MC Trainer is not affiliated with, endorsed by, or a substitute for the Motorcycle Safety Foundation or its courses, and reproduces none of its materials.</p>
+      <p class="note"><b>Ride at your own risk.</b> Practice only where you have permission and no traffic, in full protective gear, at speeds you control. You are responsible for your own safety and for checking every dimension here against your bike and your lot. Provided as-is, without warranty of any kind, under the MIT License.</p>
+    </section>`;
+  document.querySelectorAll('#ref [data-bike]').forEach(b=>b.onclick=()=>{ state.bike=b.dataset.bike; save(); renderRef(); });
 }
 
 // ---- Nav ----
 function go(id){
   document.querySelectorAll('.screen').forEach(s=>s.hidden = s.id!==id);
   document.querySelectorAll('nav button').forEach(b=>{ if(b.dataset.go===id) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
-  ({today:renderToday, cycle:renderCycle, drills:renderDrills})[id]();
+  ({today:renderToday, cycle:renderCycle, drills:renderDrills, ref:renderRef})[id]();
   window.scrollTo(0,0);
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.go));
